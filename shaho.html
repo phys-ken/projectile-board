@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>斜方投射シミュレーション</title>
+<link rel="stylesheet" href="style.css">
+</head><body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="toast"></div>
+<div id="bar">
+  <button id="bReset">⟲<span class="full"> リセット</span></button>
+  <button class="full" id="bBack">◀ コマ</button>
+  <button id="bPlay">▶ 再生</button>
+  <button class="full" id="bFwd">コマ ▶</button>
+  <span class="sp full"></span>
+  <button class="full" id="bStrobe">ストロボ</button>
+  <button class="full" id="bVec">ベクトル</button>
+  <button class="full" id="bShadow">軸への影</button>
+  <button class="full" id="bLoop">くり返し</button>
+  <span class="sp full"></span>
+  <button class="full" id="bGear">⚙ 設定</button>
+  <button class="full" id="bFull">⛶ 全画面</button>
+  <button class="full" id="bMini">▼</button>
+  <button class="minionly" id="bFull2">⛶</button>
+  <button class="minionly" id="bUnmini">▲</button>
+</div>
+<div id="drawer">
+  <div class="row"><button id="dClose" class="on">✕ 閉じる</button><a class="btnlink" href="./">← メニュー</a><button id="theme">黒板／白</button></div>
+  <div class="item"><span class="lab">初速度 v₀</span><input type="range" id="v0s" min="5" max="40" step="0.5" value="20"><span class="val" id="v0val"></span></div>
+  <div class="item"><span class="lab">角度 θ</span><input type="range" id="ths" min="5" max="85" step="1" value="45"><span class="val" id="thval"></span></div>
+  <div class="item"><span class="seg" id="thpre"></span></div>
+  <div class="item"><span class="lab">高さ h₀</span><input type="range" id="h0s" min="0" max="20" step="0.5" value="0"><span class="val" id="h0val"></span></div>
+  <div class="item"><span class="lab">時刻</span><input type="range" id="scrub" min="0" max="1000" value="0"><span class="val" id="tval">0.00 s</span></div>
+  <div class="item"><span class="lab">再生の速さ</span><span class="seg" id="speed"></span></div>
+  <div class="item"><span class="lab">ストロボ間隔</span><span class="seg" id="sint"></span></div>
+  <div class="item"><span class="lab">残像の出し方</span><span class="seg" id="smode"></span></div>
+  <div class="row"><button id="vstrobe">ストロボ位置にもベクトル</button><button id="bCmp">角度くらべ（15°〜75°）</button></div>
+  <div class="row"><button id="bPQ">最高点P・着地Q</button><button id="bGrid">グリッド</button><button id="bRead">数値表示</button></div>
+  <div class="lab">キー：Space 再生／R 最初／←→ コマ／V ベクトル／S ストロボ／F 全画面</div>
+</div>
+<script src="common.js"></script>
+<script>
+initTheme();
+const cv = $('cv'), ctx = cv.getContext('2d');
+const S = { v0: 20, th: 45, h0: 0, strobe: false, dt: 0.5, smode: 'seq', vmode: 0, vstrobe: false, pq: true, cmp: false, shadow: false, grid: true, readout: false };
+const ANG = [15, 30, 45, 60, 75];
+const VLAB = ['なし', 'v', 'vx vy', '全部'];
+const rad = (d) => (d * Math.PI) / 180;
+function traj(v0, thDeg, h0) {
+  const vx = v0 * Math.cos(rad(thDeg)), vy = v0 * Math.sin(rad(thDeg));
+  const T = (vy + Math.sqrt(vy * vy + 2 * G * h0)) / G;
+  return { vx, vy, T, t1: vy / G, H: h0 + (vy * vy) / (2 * G), R: vx * T };
+}
+const cur = () => traj(S.v0, S.th, S.h0);
+const clock = new Clock(draw);
+clock.speed = 0.5;
+function syncT() { clock.T = cur().T; clock.t = Math.min(clock.t, clock.T); }
+const refreshers = [];
+const all = () => refreshers.forEach((f) => f());
+function stepBy(n) {
+  const c = clock.t / S.dt;
+  const target = n > 0 ? Math.floor(c + 1e-6) + 1 : Math.ceil(c - 1e-6) - 1;
+  clock.seek(clamp(target * S.dt, 0, clock.T));
+}
+function cycleVec() { S.vmode = (S.vmode + 1) % 4; all(); draw(); }
+function change() { syncT(); all(); draw(); }
+
+function ui() {
+  wireShell();
+  $('bReset').onclick = () => clock.reset();
+  $('bPlay').onclick = () => clock.toggle();
+  $('bFwd').onclick = () => { clock.pause(); stepBy(1); };
+  $('bBack').onclick = () => { clock.pause(); stepBy(-1); };
+  $('bVec').onclick = cycleVec;
+  refreshers.push(() => { $('bVec').textContent = 'ベクトル：' + VLAB[S.vmode]; $('bVec').classList.toggle('on', S.vmode > 0); });
+  refreshers.push(toggleBtn($('bStrobe'), () => S.strobe, (v) => { S.strobe = v; draw(); }));
+  refreshers.push(toggleBtn($('bShadow'), () => S.shadow, (v) => { S.shadow = v; draw(); }));
+  refreshers.push(toggleBtn($('bLoop'), () => clock.loop, (v) => { clock.loop = v; }));
+  refreshers.push(toggleBtn($('bGrid'), () => S.grid, (v) => { S.grid = v; draw(); }));
+  refreshers.push(toggleBtn($('bRead'), () => S.readout, (v) => { S.readout = v; draw(); }));
+  refreshers.push(toggleBtn($('bPQ'), () => S.pq, (v) => { S.pq = v; draw(); }));
+  refreshers.push(toggleBtn($('bCmp'), () => S.cmp, (v) => { S.cmp = v; draw(); }));
+  refreshers.push(toggleBtn($('vstrobe'), () => S.vstrobe, (v) => { S.vstrobe = v; draw(); }));
+  $('scrub').oninput = (e) => { clock.playing = false; clock.seek(e.target.value / 1000 * clock.T); };
+  $('v0s').oninput = (e) => { S.v0 = +e.target.value; change(); };
+  $('ths').oninput = (e) => { S.th = +e.target.value; change(); };
+  $('h0s').oninput = (e) => { S.h0 = +e.target.value; change(); };
+  refreshers.push(() => { $('v0s').value = S.v0; $('ths').value = S.th; $('h0s').value = S.h0; });
+  refreshers.push(segment($('thpre'), ANG.map((a) => [a + '°', a]), () => S.th, (v) => { S.th = v; change(); }));
+  refreshers.push(segment($('speed'), [['0.25×', 0.25], ['0.5×', 0.5], ['1×', 1]], () => clock.speed, (v) => (clock.speed = v)));
+  refreshers.push(segment($('sint'), [['0.25', 0.25], ['0.5', 0.5], ['1 s', 1]], () => S.dt, (v) => { S.dt = v; draw(); }));
+  refreshers.push(segment($('smode'), [['順に出す', 'seq'], ['全部出す', 'all']], () => S.smode, (v) => { S.smode = v; draw(); }));
+  $('theme').onclick = () => { setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); draw(); };
+  window.addEventListener('resize', draw);
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const k = e.key;
+    if (k === ' ') { e.preventDefault(); clock.toggle(); }
+    else if (k === 'r' || k === 'R') clock.reset();
+    else if (k === 'ArrowRight') { e.preventDefault(); clock.pause(); stepBy(1); }
+    else if (k === 'ArrowLeft') { e.preventDefault(); clock.pause(); stepBy(-1); }
+    else if (k === 'v' || k === 'V') cycleVec();
+    else if (k === 's' || k === 'S') { S.strobe = !S.strobe; all(); draw(); }
+    else if (k === 'f' || k === 'F') toggleFullscreen();
+  });
+}
+
+function draw() {
+  const { w, h, dpr: rdpr } = fitCanvas(cv);
+  const U = Math.max(0.9 * rdpr, Math.min(w, h) / 700);
+  const th = theme, c = cur(), t = clock.t, T = c.T;
+  $('tval').textContent = t.toFixed(2) + ' s';
+  $('scrub').value = Math.round((t / T) * 1000);
+  $('v0val').textContent = S.v0.toFixed(1) + ' m/s';
+  $('thval').textContent = S.th + '°';
+  $('h0val').textContent = S.h0.toFixed(1) + ' m';
+  $('bPlay').textContent = clock.playing ? '⏸ 止める' : (t >= T ? '⟲ もう一度' : '▶ 再生');
+  ctx.fillStyle = th.bg; ctx.fillRect(0, 0, w, h);
+
+  const set = S.cmp ? [...ANG.map((a) => traj(S.v0, a, S.h0)), c] : [c];
+  const xr = Math.max(...set.map((q) => q.R), 1) * 1.08 + 2, yr = Math.max(...set.map((q) => q.H), 1) * 1.12 + 1;
+  const barH = $('bar').offsetHeight * rdpr;
+  const padL = 70 * U, padR = 60 * U, padT = 36 * U, padB = barH + 40 * U;
+  const sc = Math.min((w - padL - padR) / xr, (h - padT - padB) / yr);
+  const ox = padL, oy = h - padB;
+  const X = (x) => ox + x * sc, Y = (y) => oy - y * sc;
+  const lw = 4 * U;
+  const font = (px) => `bold ${px * U}px "BIZ UDPGothic","Hiragino Sans","Noto Sans JP",sans-serif`;
+  const xmaxW = (w - padR - ox) / sc, ymaxW = (oy - padT) / sc;
+
+  const st = niceStep(60 * U / sc), major = st * 5;
+  ctx.textBaseline = 'middle'; ctx.font = font(20); ctx.fillStyle = th.dim;
+  const isM = (a) => Math.abs(a / major - Math.round(a / major)) < 1e-6;
+  for (let a = 0; a <= xmaxW + 1e-9; a += st) {
+    const m = isM(a);
+    if (S.grid) { ctx.strokeStyle = m ? th.major : th.grid; ctx.lineWidth = (m ? 1.8 : 1) * U; ctx.beginPath(); ctx.moveTo(X(a), oy); ctx.lineTo(X(a), Y(ymaxW)); ctx.stroke(); }
+    if (a > 0 && (m || st >= 5)) { ctx.textAlign = 'center'; ctx.fillText(+a.toFixed(6), X(a), oy + 22 * U); }
+  }
+  for (let a = 0; a <= ymaxW + 1e-9; a += st) {
+    const m = isM(a);
+    if (S.grid) { ctx.strokeStyle = m ? th.major : th.grid; ctx.lineWidth = (m ? 1.8 : 1) * U; ctx.beginPath(); ctx.moveTo(ox, Y(a)); ctx.lineTo(X(xmaxW), Y(a)); ctx.stroke(); }
+    if (a > 0 && (m || st >= 5)) { ctx.textAlign = 'right'; ctx.fillText(+a.toFixed(6), ox - 12 * U, Y(a)); }
+  }
+  // 地面と台
+  ctx.lineCap = 'round';
+  ctx.fillStyle = th.ground; ctx.fillRect(ox - 30 * U, oy, X(xmaxW) - ox + 30 * U, 10 * U);
+  if (S.h0 > 0) { ctx.globalAlpha = 0.45; ctx.fillRect(ox - 30 * U, Y(S.h0), 30 * U, S.h0 * sc); ctx.globalAlpha = 1; ctx.fillRect(ox - 30 * U, Y(S.h0) - 4 * U, 30 * U, 8 * U); }
+  // 軸
+  arrow(ctx, ox - 10 * U, oy, X(xmaxW) + 14 * U, oy, th.axis, 3.5 * U);
+  arrow(ctx, ox, oy + 10 * U, ox, Y(ymaxW) - 8 * U, th.axis, 3.5 * U);
+  ctx.fillStyle = th.axis; ctx.font = `italic ${40 * U}px ${SERIF}`;
+  ctx.textAlign = 'right'; ctx.fillText('x', X(xmaxW) + 4 * U, oy - 30 * U);
+  ctx.textAlign = 'left'; ctx.fillText('y', ox + 16 * U, Y(ymaxW) + 6 * U);
+  ctx.font = `${30 * U}px ${SERIF}`; ctx.textAlign = 'right'; ctx.fillText('O', ox - 10 * U, oy + 26 * U);
+  // 重力
+  { const gx = X(xmaxW) - 40 * U, g0 = Y(ymaxW) + 60 * U, g1 = g0 + 90 * U;
+    arrow(ctx, gx, g0, gx, g1, th.g, 6 * U);
+    ctx.fillStyle = th.fg; ctx.font = `italic ${42 * U}px ${SERIF}`; ctx.textAlign = 'left'; ctx.fillText('g', gx + 16 * U, (g0 + g1) / 2); }
+
+  const pos = (tt) => { const tc = Math.min(tt, T); return { x: c.vx * tc, y: S.h0 + c.vy * tc - 0.5 * G * tc * tc, vx: c.vx, vy: c.vy - G * tc }; };
+  const R = Math.max(14 * U, 0.012 * Math.min(w, h));
+  const ball = (p, col, a = 1) => { ctx.globalAlpha = a; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), R, 0, 7); ctx.fill(); ctx.strokeStyle = th.bg; ctx.lineWidth = 2.5 * U; ctx.stroke(); ctx.globalAlpha = 1; };
+  const shadow = (p, col, a) => {
+    const bx = X(p.x), by = Y(p.y);
+    ctx.globalAlpha = a * 0.7; ctx.strokeStyle = col; ctx.lineWidth = 1.8 * U; ctx.setLineDash([6 * U, 6 * U]);
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, oy); ctx.moveTo(bx, by); ctx.lineTo(ox, by); ctx.stroke(); ctx.setLineDash([]);
+    ctx.globalAlpha = a; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(bx, oy, R * 0.8, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(ox, by, R * 0.8, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  };
+  const kv = 0.2 * Math.max(c.R, c.H) / Math.max(S.v0, 1) * 0.5;
+  const vec = (p) => {
+    if (S.vmode === 0) return;
+    const x0 = X(p.x), y0 = Y(p.y), ex = x0 + p.vx * kv * sc, ey = y0 - p.vy * kv * sc;
+    if (S.vmode >= 2) {
+      if (Math.abs(p.vx) > 0.01) arrow(ctx, x0, y0, ex, y0, th.vx, lw);
+      if (Math.abs(p.vy) > 0.01) arrow(ctx, x0, y0, x0, ey, th.vy, lw);
+    }
+    if (S.vmode === 1 || S.vmode === 3) {
+      if (S.vmode === 3) { ctx.setLineDash([6 * U, 6 * U]); ctx.strokeStyle = th.dim; ctx.lineWidth = U; ctx.beginPath(); ctx.moveTo(ex, y0); ctx.lineTo(ex, ey); ctx.moveTo(x0, ey); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]); }
+      if (p.vx * p.vx + p.vy * p.vy > 1e-4) arrow(ctx, x0, y0, ex, ey, th.vec, lw * 1.2);
+    }
+  };
+
+  if (S.cmp) ANG.forEach((a, i) => {
+    const q = traj(S.v0, a, S.h0);
+    ctx.strokeStyle = th.balls[i]; ctx.lineWidth = 3.2 * U; ctx.globalAlpha = 0.85; ctx.beginPath();
+    for (let k = 0; k <= 100; k++) { const tt = (q.T * k) / 100, x = q.vx * tt, y = S.h0 + q.vy * tt - 0.5 * G * tt * tt; k ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y)); }
+    ctx.stroke(); ctx.globalAlpha = 1;
+    ctx.fillStyle = th.balls[i]; ctx.font = font(26); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(a + '°', X(q.vx * q.t1), Y(q.H) - 8 * U); ctx.textBaseline = 'middle';
+  });
+  const path = (a, b) => { ctx.beginPath(); for (let k = 0; k <= 100; k++) { const p = pos(a + ((b - a) * k) / 100); k ? ctx.lineTo(X(p.x), Y(p.y)) : ctx.moveTo(X(p.x), Y(p.y)); } ctx.stroke(); };
+  ctx.strokeStyle = th.fg; ctx.globalAlpha = 0.4; ctx.lineWidth = 3 * U; ctx.setLineDash([3 * U, 9 * U]); path(t, T); ctx.setLineDash([]);
+  ctx.globalAlpha = 0.9; ctx.lineWidth = 3.5 * U; path(0, t); ctx.globalAlpha = 1;
+
+  if (S.pq) {
+    const P = { x: c.vx * c.t1, y: c.H }, Q = { x: c.R, y: 0 };
+    ctx.setLineDash([8 * U, 6 * U]); ctx.strokeStyle = th.accent; ctx.lineWidth = 2.5 * U;
+    ctx.beginPath(); ctx.moveTo(X(P.x), Y(P.y)); ctx.lineTo(X(P.x), oy); ctx.moveTo(ox, Y(P.y)); ctx.lineTo(X(P.x), Y(P.y)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = th.accent; ctx.beginPath(); ctx.arc(X(P.x), Y(P.y), 7 * U, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(X(Q.x), Y(Q.y), 7 * U, 0, 7); ctx.fill();
+    ctx.font = font(26); ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`P  t₁＝${c.t1.toFixed(2)} s  H＝${c.H.toFixed(1)} m`, X(P.x) + 12 * U, Y(P.y) - 10 * U);
+    ctx.textAlign = 'right';
+    ctx.fillText(`Q  t₂＝${c.T.toFixed(2)} s`, X(Q.x) - 14 * U, oy - 48 * U);
+    ctx.fillText(`OQ＝${c.R.toFixed(1)} m`, X(Q.x) - 14 * U, oy - 16 * U);
+    ctx.textBaseline = 'middle';
+  }
+
+  const times = [];
+  if (S.strobe) for (let k = 1; k * S.dt <= T + 1e-9; k++) { const tt = k * S.dt; if (S.smode === 'all' || tt <= t + 1e-9) times.push(tt); }
+  if (S.strobe && S.smode === 'all') times.unshift(0);
+  times.forEach((tt) => { const p = pos(tt); if (S.shadow) shadow(p, th.balls[0], 0.4); ball(p, th.balls[0], 0.55); if (S.vstrobe) vec(p); });
+  const p = pos(t);
+  if (S.shadow) shadow(p, th.balls[0], 1);
+  ball(p, th.balls[0]); vec(p);
+  if (t === 0 && S.vmode === 0) arrow(ctx, X(0), Y(S.h0), X(0) + c.vx * kv * sc, Y(S.h0) - c.vy * kv * sc, th.vec, lw * 1.2);
+
+  if (S.readout) {
+    const sp = Math.hypot(p.vx, p.vy);
+    const lines = [[`t ＝ ${t.toFixed(2)} s`, 34, th.fg], [`x ＝ ${p.x.toFixed(1)} m　y ＝ ${p.y.toFixed(1)} m`, 26, th.dim],
+      [`vx ＝ ${p.vx.toFixed(1)} m/s`, 26, th.vx], [`vy ＝ ${p.vy.toFixed(1)} m/s（上向き正）`, 26, th.vy], [`v ＝ ${sp.toFixed(1)} m/s`, 26, th.fg]];
+    ctx.globalAlpha = 0.85; ctx.fillStyle = th.bg; ctx.fillRect(w - 500 * U, 6 * U, 494 * U, 220 * U); ctx.globalAlpha = 1;
+    ctx.textBaseline = 'top'; ctx.textAlign = 'right'; let ry = 12 * U;
+    lines.forEach(([s, px, col]) => { ctx.fillStyle = col; ctx.font = font(px); ctx.fillText(s, w - 16 * U, ry); ry += (px + 10) * U; });
+  }
+}
+ui(); syncT();
+{
+  const q = new URLSearchParams(location.search);
+  for (const k of ['v0', 'th', 'h0']) if (q.has(k)) S[k] = +q.get(k);
+  if (q.has('strobe')) S.strobe = q.get('strobe') === '1';
+  if (q.has('v')) S.vmode = +q.get('v');
+  if (q.has('vs')) S.vstrobe = q.get('vs') === '1';
+  if (q.has('cmp')) S.cmp = q.get('cmp') === '1';
+  if (q.has('shadow')) S.shadow = q.get('shadow') === '1';
+  if (q.has('dt')) S.dt = +q.get('dt');
+  if (q.has('mini')) setMini(q.get('mini') === '1');
+  if (q.has('drawer')) setDrawer(q.get('drawer') === '1');
+  if (q.has('read')) S.readout = q.get('read') === '1';
+  syncT();
+  if (q.has('t')) clock.t = clamp(+q.get('t'), 0, clock.T);
+  all();
+}
+draw();
+</script>
+</body></html>

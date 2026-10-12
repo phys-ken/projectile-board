@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>投射シミュレーション</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{overflow:auto;align-items:center;justify-content:center;gap:22px;padding:24px}
+h1{font-size:clamp(26px,5vw,44px);margin:0}
+.menu{display:flex;flex-wrap:wrap;gap:18px;justify-content:center}
+.menu a{display:block;width:min(86vw,380px);padding:26px 24px;border:3px solid var(--panel-line);border-radius:18px;background:var(--panel);color:var(--fg);text-decoration:none}
+.menu a:hover{border-color:var(--accent)}
+.menu b{font-size:28px;display:block;margin-bottom:8px}
+.menu span{color:var(--dim);font-size:17px;line-height:1.5}
+</style></head><body>
+<h1>投射シミュレーション</h1>
+<div class="menu">
+  <a href="suihei.html"><b>水平投射</b><span>初速度のちがう球を最大5個同時に。自由落下（v₀＝0）も入れて、落下時間が同じことを見る。</span></a>
+  <a href="shaho.html"><b>斜方投射</b><span>v₀・角度・初めの高さを変える。最高点・落下点の値、角度の比較つき。</span></a>
+</div>
+<button id="t">黒板／白</button>
+<script src="common.js"></script>
+<script>initTheme();$('t').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');</script>
+</body></html>
